@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "orbitflare": {
+      "command": "node",
+      "args": [
+        "./dist/index.js"
+      ],
+      "env": {
+        "ORBITFLARE_API_KEY": "",
+        "ORBITFLARE_NETWORK": "mainnet"
+      }
+    }
+  }
+}

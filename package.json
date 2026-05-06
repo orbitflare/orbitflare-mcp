@@ -1,6 +1,6 @@
 {
   "name": "orbitflare-mcp",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "OrbitFlare MCP Server — Solana RPC, streaming, staking, and account tools for AI assistants, powered by OrbitFlare's Shredstream-optimized infrastructure",
   "type": "module",
   "main": "dist/index.js",

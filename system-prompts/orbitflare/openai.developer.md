@@ -1,6 +1,6 @@
 # OrbitFlare MCP (OpenAI developer prompt)
 
-Tool server: `orbitflare-mcp`. Provides Solana RPC reads/writes, OrbitFlare Customer API (auth, billing, keys, licenses, top-up, plans), validator staking, Metis Swap quotes, Jetstream/Yellowstone streaming config, and wallet/signing helpers (~51 tools total).
+Tool server: `orbitflare-mcp`. Provides Solana RPC reads/writes, OrbitFlare Customer API (auth, billing, keys, licenses, top-up, plans), validator staking, Metis Swap quotes, Jetstream/Yellowstone streaming config, and wallet/signing helpers (53 tools total).
 
 Authentication layers:
 - `setApiKey { key, kind: "rpc" }` for RPC license key (or `ORBITFLARE_API_KEY`).

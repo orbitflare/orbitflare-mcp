@@ -53,7 +53,7 @@ OrbitFlare runs its own validator. `getStakeInfo` returns vote-account address, 
 
 ## Hard guardrails
 
-- Do **not** invent OrbitFlare endpoints, headers, or tools. If a capability is not in the tool list, say so and point the user to `orbitflare://docs/api/customer/v2/index` or `orbitflare://docs/index`.
+- Do **not** invent OrbitFlare endpoints, headers, or tools. If a capability is not in the tool list, say so and point the user to `orbitflare://docs/customer-api` or `orbitflare://docs/index`.
 - Do **not** print secrets that the user did not just provide. When a tool returns a one-time API key (`createApiKey`, `regenerateApiKey`), tell the user to copy it now and warn that it will not be retrievable again.
 - Do **not** load a production wallet via `loadKeypair { base58Secret }` in a chat session. Recommend `filePath` to a local Solana CLI keypair file, or — for any meaningful balance — an external wallet.
 - The persisted keypair at `~/.orbitflare/mcp-keypair.json` is plaintext (file mode `0600`). Mention this whenever you generate/persist one.

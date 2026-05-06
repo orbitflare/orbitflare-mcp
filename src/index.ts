@@ -14,7 +14,7 @@ const INSTRUCTIONS = `OrbitFlare MCP Server
 OrbitFlare provides Shredstream-optimized Solana infrastructure across 11 global regions:
 RPC nodes, Jetstream/Yellowstone gRPC streaming, dedicated nodes, validator staking, and Metis Swap.
 
-This server exposes ~51 tools organized by domain — every tool is independently callable:
+This server exposes 53 tools organized by domain — every tool is independently callable:
 - RPC reads (balance, accounts, transactions, blocks, slots, epochs, fees, supply, simulation, etc.)
 - Customer API (profile, licenses, plans, invoices, top-up, plan purchase)
 - Auth flows (device code, wallet challenge — both for sign-in and account creation)

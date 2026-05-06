@@ -2,13 +2,15 @@
 
 An [MCP](https://modelcontextprotocol.io) server for [OrbitFlare](https://orbitflare.com) — Shredstream-optimized Solana RPC, gRPC streaming, dedicated nodes, and validator infrastructure across 11 global regions, exposed as tools your AI assistant can call.
 
-Works in any MCP-compatible client: Claude Desktop, Cursor, Windsurf, VS Code, Continue, and the like.
+Works in any MCP-compatible client: Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Continue, Gemini CLI, OpenAI Codex CLI, and the like.
 
 ---
 
 ## Quick Start
 
 ### 1. Add the server to your MCP host
+
+Most hosts (Claude Desktop, Claude Code, Cursor, Gemini CLI, Windsurf, VS Code) take the same JSON shape — only the file location differs:
 
 ```json
 {
@@ -23,6 +25,23 @@ Works in any MCP-compatible client: Claude Desktop, Cursor, Windsurf, VS Code, C
     }
   }
 }
+```
+
+| Host           | Where to put it                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) · `%APPDATA%\Claude\claude_desktop_config.json` (Windows)   |
+| Claude Code    | run `claude mcp add orbitflare -- npx orbitflare-mcp@latest`, or drop a `.mcp.json` at your project root                              |
+| Cursor         | `~/.cursor/mcp.json` (global) or `<project>/.cursor/mcp.json`                                                                         |
+| Gemini CLI     | `~/.gemini/settings.json` (global) or `<project>/.gemini/settings.json`                                                               |
+| Windsurf       | `~/.codeium/windsurf/mcp_config.json`                                                                                                 |
+| VS Code        | depends on extension (Continue, Cline, GitHub Copilot agent mode)                                                                     |
+
+**Codex CLI** uses TOML at `~/.codex/config.toml` (or `<project>/.codex/config.toml`):
+
+```toml
+[mcp_servers.orbitflare]
+command = "npx"
+args = ["orbitflare-mcp@latest"]
 ```
 
 ### 2. Get a license key
@@ -61,7 +80,7 @@ Each capability is its own MCP tool with a focused input schema — no internal 
 
 ## Tools
 
-51 tools, grouped by domain. Every tool is independently callable — no internal `action` routers.
+53 tools, grouped by domain. Every tool is independently callable — no internal `action` routers.
 
 ### RPC reads
 
@@ -230,22 +249,11 @@ git clone https://github.com/orbitflare/orbitflare-mcp.git
 cd orbitflare-mcp
 npm install
 npm run build
-node dist/index.js     # speaks MCP over stdio
 ```
 
-Point your MCP host at the local build:
+The repo ships project-scoped configs for Claude Code (`.mcp.json`), Cursor (`.cursor/mcp.json`), Gemini CLI (`.gemini/settings.json`), and Codex CLI (`.codex/config.toml`). Open the folder in any of them after the build and the dev server connects automatically — set `ORBITFLARE_API_KEY` in the `env` block (or call `setApiKey` from chat) once.
 
-```json
-{
-  "mcpServers": {
-    "orbitflare-dev": {
-      "command": "node",
-      "args": ["/absolute/path/to/orbitflare-mcp/dist/index.js"],
-      "env": { "ORBITFLARE_API_KEY": "..." }
-    }
-  }
-}
-```
+For hosts without project-scoped configs (e.g. Claude Desktop), point them at the absolute path of `dist/index.js`.
 
 ---
 

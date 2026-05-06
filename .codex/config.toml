@@ -1,0 +1,3 @@
+[mcp_servers.orbitflare]
+command = "node"
+args = ["./dist/index.js"]
