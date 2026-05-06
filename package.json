@@ -1,5 +1,5 @@
 {
-  "name": "orbitflare-mcp",
+  "name": "@orbitflare/mcp",
   "version": "0.1.0",
   "description": "OrbitFlare MCP Server — Solana RPC, streaming, staking, and account tools for AI assistants, powered by OrbitFlare's Shredstream-optimized infrastructure",
   "type": "module",
@@ -33,7 +33,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/orbitflare/orbitflare-mcp"
+    "url": "git+https://github.com/orbitflare/orbitflare-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/orbitflare/orbitflare-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "homepage": "https://docs.orbitflare.com",
   "dependencies": {

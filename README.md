@@ -17,7 +17,7 @@ Most hosts (Claude Desktop, Claude Code, Cursor, Gemini CLI, Windsurf, VS Code) 
   "mcpServers": {
     "orbitflare": {
       "command": "npx",
-      "args": ["orbitflare-mcp@latest"],
+      "args": ["@orbitflare/mcp@latest"],
       "env": {
         "ORBITFLARE_API_KEY": "your-license-key",
         "ORBITFLARE_NETWORK": "mainnet"
@@ -30,7 +30,7 @@ Most hosts (Claude Desktop, Claude Code, Cursor, Gemini CLI, Windsurf, VS Code) 
 | Host           | Where to put it                                                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) · `%APPDATA%\Claude\claude_desktop_config.json` (Windows)   |
-| Claude Code    | run `claude mcp add orbitflare -- npx orbitflare-mcp@latest`, or drop a `.mcp.json` at your project root                              |
+| Claude Code    | run `claude mcp add orbitflare -- npx @orbitflare/mcp@latest`, or drop a `.mcp.json` at your project root                             |
 | Cursor         | `~/.cursor/mcp.json` (global) or `<project>/.cursor/mcp.json`                                                                         |
 | Gemini CLI     | `~/.gemini/settings.json` (global) or `<project>/.gemini/settings.json`                                                               |
 | Windsurf       | `~/.codeium/windsurf/mcp_config.json`                                                                                                 |
@@ -41,7 +41,7 @@ Most hosts (Claude Desktop, Claude Code, Cursor, Gemini CLI, Windsurf, VS Code) 
 ```toml
 [mcp_servers.orbitflare]
 command = "npx"
-args = ["orbitflare-mcp@latest"]
+args = ["@orbitflare/mcp@latest"]
 ```
 
 ### 2. Get a license key
