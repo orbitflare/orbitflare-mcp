@@ -9,7 +9,6 @@ export interface CustomerApiOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | undefined>;
-  /** If true, the request is sent without authentication (used for device/code, wallet/challenge, etc.). */
   public?: boolean;
 }
 
@@ -24,10 +23,16 @@ export class CustomerApiError extends Error {
   }
 }
 
-export async function customerApi<T = unknown>(
-  path: string,
-  opts: CustomerApiOptions = {},
-): Promise<T> {
+function errorMessage(parsed: unknown, fallback: string): string {
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as { message?: unknown; error?: unknown; errors?: unknown };
+    const base = typeof obj.message === 'string' ? obj.message : typeof obj.error === 'string' ? obj.error : fallback;
+    return obj.errors && typeof obj.errors === 'object' ? `${base} ${JSON.stringify(obj.errors)}` : base;
+  }
+  return typeof parsed === 'string' && parsed.length < 300 ? parsed : fallback;
+}
+
+export async function customerApi<T = any>(path: string, opts: CustomerApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -36,27 +41,19 @@ export async function customerApi<T = unknown>(
   if (!opts.public) {
     const bearer = getBearerToken();
     const key = getCustomerApiKey();
-    if (bearer) {
-      headers.Authorization = `Bearer ${bearer}`;
-    } else if (key) {
-      headers['X-ORBIT-KEY'] = key;
-    } else {
-      throw new MissingApiKeyError('customer');
-    }
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    else if (key) headers['X-ORBIT-KEY'] = key;
+    else throw new MissingApiKeyError('customer');
   }
 
   const search = opts.query
-    ? '?' +
-      Object.entries(opts.query)
-        .filter(([, v]) => v !== undefined && v !== null)
-        .map(
-          ([k, v]) =>
-            `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
-        )
-        .join('&')
+    ? new URLSearchParams(
+        Object.entries(opts.query)
+          .filter(([, v]) => v !== undefined && v !== null)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()
     : '';
-
-  const url = `${getCustomerApiBase()}${path.startsWith('/') ? path : '/' + path}${search}`;
+  const url = `${getCustomerApiBase()}${path.startsWith('/') ? path : '/' + path}${search ? '?' + search : ''}`;
 
   const response = await fetch(url, {
     method: opts.method ?? 'GET',
@@ -75,28 +72,25 @@ export async function customerApi<T = unknown>(
   }
 
   if (!response.ok) {
-    const msg =
-      parsed && typeof parsed === 'object' && 'message' in parsed
-        ? String((parsed as { message: unknown }).message)
-        : `OrbitFlare Customer API HTTP ${response.status}`;
-    throw new CustomerApiError(response.status, parsed, msg);
+    throw new CustomerApiError(
+      response.status,
+      parsed,
+      errorMessage(parsed, `OrbitFlare Customer API HTTP ${response.status}`),
+    );
   }
-
-  if (
-    parsed &&
-    typeof parsed === 'object' &&
-    'success' in parsed &&
-    (parsed as { success: unknown }).success === false
-  ) {
-    const obj = parsed as { message?: unknown; error?: unknown };
-    const msg =
-      typeof obj.message === 'string'
-        ? obj.message
-        : typeof obj.error === 'string'
-          ? obj.error
-          : 'OrbitFlare Customer API returned success: false';
-    throw new CustomerApiError(response.status, parsed, msg);
+  if (parsed && typeof parsed === 'object' && (parsed as { success?: unknown }).success === false) {
+    throw new CustomerApiError(
+      response.status,
+      parsed,
+      errorMessage(parsed, 'OrbitFlare Customer API returned success: false'),
+    );
   }
-
   return parsed as T;
+}
+
+export function unwrap<T = any>(response: unknown): T {
+  if (response && typeof response === 'object' && 'data' in response) {
+    return (response as { data: T }).data;
+  }
+  return response as T;
 }
