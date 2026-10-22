@@ -6,62 +6,58 @@ Thanks for helping make OrbitFlare easier to drive from AI assistants. This docu
 
 ```
 src/
-  config.ts              session state (RPC key, customer key, bearer token, network, region, wallet)
-  index.ts               server entry point
+  config.ts              session state (keys, bearer token, network, region, endpoints)
+  index.ts               server entry point and model-facing instructions
   tools/
-    rpc/                 thin JSON-RPC wrappers
-    account/             customer-account reads / profile updates
-    auth/                device-code + wallet-challenge auth flows
-    keys/                API key management
-    licenses/            license key + IP whitelist
-    billing/             top-up + invoices + plan purchases
-    streaming/           Jetstream / Yellowstone config builder
-    staking/             validator staking info
-    swap/                Metis swap quotes
-    wallet/              keypair management, signing, tx building
+    define.ts            defineTool wrapper, annotation presets, confirm schema
+    assets.ts            DAS: portfolio, assets, search, token holders
+    chain.ts             accounts, transactions, history, fees, network status, rpcRequest
+    swap.ts              Metis swap quotes
+    streaming.ts         Jetstream and WebSocket watchers
+    transactions.ts      build, simulate and send
+    apex.ts              Apex sends, bundles, tips, ping
+    wallet.ts            signing keypair
+    account.ts           session config, sign-in, Customer API
   resources/             orbitflare://docs/* MCP resources
   utils/
-    rpc.ts               JSON-RPC client
-    customerApi.ts       REST client for OrbitFlare Customer API
+    rpc.ts               @orbitflare/sdk RpcClient (failover + retry)
+    customerApi.ts       REST client for the OrbitFlare Customer API
+    transactions.ts      decode, describe, sign and build transactions
+    apex.ts              Apex client and tip checks
     keypair.ts           Solana keypair helpers (@solana/kit)
-    formatters.ts        consistent tool result shaping
+    formatters.ts        result shaping, confirmation previews
+    logger.ts            stderr-only SDK logger
 system-prompts/orbitflare/   pre-built system prompts for Claude / OpenAI
-tests/                   end-to-end tests using the MCP SDK over stdio
+tests/                   end-to-end tests using the MCP SDK over stdio against local mock servers
 ```
 
-## Adding a new tool
+## Adding a tool
 
-1. **Pick a folder** under `src/tools/<domain>/`. One file per tool — keep them under ~80 lines.
-2. **Use direct-tool pattern.** Each capability is its own tool (we don't multiplex by `action` field). The tool's `description` should tell the model exactly when to use it and what it returns.
-3. **Validate inputs with Zod.** Add a `const inputSchema = { ... }` at the top of the file. Model gets the JSON Schema for free.
-4. **Return shaped output via `formatters.ts`.** Use `asJson({...})` for structured data, `asText("…")` for short messages, `asError(err)` for failures. Errors should always go through `asError` so the SDK marks the response as an error result.
-5. **Wire it up in `src/tools/index.ts`** — import the registrar and call it from `registerTools(server)`.
-6. **Add a test in `tests/e2e.test.ts`** — at minimum, assert it appears in `EXPECTED_TOOLS`. For tools that hit a live network, gate them on `SKIP_NETWORK !== '1'`.
+1. **Prefer extending an existing tool.** The tool list is deliberately small. A new RPC method is usually reachable through `rpcRequest`; add a dedicated tool only when it saves the model real work (aggregation, decoding, pagination).
+2. **Register with `defineTool`** in the domain file. Give it a `title`, a description that says when to use it and what it returns, a zod `input` shape, and an annotation preset from `define.ts` (`READ`, `WRITE`, `DESTRUCTIVE`, ...).
+3. **Gate anything that moves funds, spends balance or deletes data** behind `confirm: confirmSchema`. Without `confirm: true`, return `needsConfirmation(...)` with a preview of what would happen.
+4. **Return output via `formatters.ts`.** `asJson` adds `structuredContent`; throw errors and `defineTool` turns them into error results. Add an `output` schema only when the result is bounded.
+5. **Never write to stdout.** It carries MCP traffic; SDK logging goes through `utils/logger.ts` to stderr.
+6. **Test it** in `tests/` against a mock server from `tests/helpers.ts`, and add the name to the expected list in `tests/e2e.test.ts`.
 
 ### Authentication conventions
 
-- RPC tools call `rpcCall(method, params)`; this throws `MissingApiKeyError('rpc')` if no RPC license key is configured.
-- Customer API tools call `customerApi(path, opts)`. By default it requires a bearer token or X-ORBIT-KEY. Pass `opts.public = true` for endpoints that don't require auth (`/auth/device/code`, `/auth/wallet/challenge`).
-- Wallet tools rely on a session keypair from `utils/keypair.ts` — surface a clear error when none is loaded.
+- RPC tools call `rpcCall(method, params)` or `withRpc(client => ...)`; these throw `MissingApiKeyError('rpc')` if no license key is configured.
+- Customer API tools call `customerApi(path, opts)` and `unwrap()` the `data` envelope. Pass `opts.public = true` for endpoints that don't require auth (`/auth/device/code`, `/auth/wallet/challenge`).
+- Signing uses the session keypair from `utils/keypair.ts`; `requireSigner()` throws a clear error when none is loaded.
 
 ## Test conventions
 
-We use [`vitest`](https://vitest.dev). Tests spawn the built MCP server over stdio via the official `@modelcontextprotocol/sdk` client.
+We use [`vitest`](https://vitest.dev). Tests spawn the built MCP server over stdio via the official `@modelcontextprotocol/sdk` client, with a temporary `HOME` and local mock HTTP, WebSocket and gRPC servers. No test touches the real network.
 
 ```bash
 npm test                  # build + full suite
-npm test -- --watch       # iterate
-SKIP_NETWORK=1 npm test   # skip live RPC / Metis calls
+npx vitest                # watch mode (after npm run build)
 ```
-
-Add per-tool assertions:
-- A "tool is registered" check in the `EXPECTED_TOOLS` list.
-- For pure-shape tools, assert the JSON contains the expected top-level keys.
-- For network calls, gate behind `SKIP_NETWORK` and assert the response shape, not specific values.
 
 ## Code style
 
-- TypeScript, strict mode, no `any`.
+- TypeScript, strict mode.
 - ESM only (`type: "module"` in `package.json`); imports use the `.js` extension that `tsc` rewrites.
 - Comments explain *why*, not *what*. Skip narrating obvious code.
 - Imports grouped: std lib → third-party → local.
@@ -71,5 +67,5 @@ Add per-tool assertions:
 
 1. Bump `package.json` version.
 2. Update `CHANGELOG.md` with the new entry.
-3. `npm test` must pass with and without `SKIP_NETWORK=1`.
+3. `npm test` must pass.
 4. `npm run build`, then `npm publish`.

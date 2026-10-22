@@ -1,615 +1,210 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { resolve } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { call, mockServer, spawnServer, type Harness, type MockHttp } from './helpers.js';
 
-const SERVER_PATH = resolve(__dirname, '..', 'dist', 'index.js');
-const SKIP_NETWORK = process.env.SKIP_NETWORK === '1';
-
-const EXPECTED_TOOLS = [
-  // session
-  'setApiKey',
-  // RPC
-  'getBalance',
-  'getAccountInfo',
+const READ_ONLY = [
+  'getWalletPortfolio',
+  'getAsset',
+  'searchAssets',
+  'getTokenHolders',
+  'getAccount',
   'getTransaction',
-  'getSignaturesForAddress',
-  'getBlock',
-  'getTokenAccountsByOwner',
-  'sendTransaction',
-  'getRecentPrioritizationFees',
-  'getSlot',
-  'getEpochInfo',
+  'getTransactionHistory',
+  'getPriorityFees',
   'getNetworkStatus',
-  'getLatestBlockhash',
-  'getFeeForMessage',
-  'getMinimumBalanceForRentExemption',
-  'getTokenSupply',
-  'getTokenAccountBalance',
-  'getMultipleAccounts',
-  'getProgramAccounts',
-  'simulateTransaction',
-  'getStakeActivation',
-  // account / customer api
-  'getProfile',
-  'updateProfile',
-  'listLicenses',
-  'listRpcPlans',
-  // auth
-  'requestDeviceCode',
-  'pollDeviceToken',
-  'revokeToken',
-  'requestWalletChallenge',
-  'verifyWalletSignature',
-  'registerWithWallet',
-  // api keys
-  'listApiKeys',
-  'createApiKey',
-  'regenerateApiKey',
-  'deleteApiKey',
-  // licenses
-  'addLicenseIp',
-  'removeLicenseIp',
-  'regenerateLicenseKey',
-  // billing
-  'prepareTopUp',
-  'confirmTopUp',
-  'listInvoices',
-  'purchaseRpcPlan',
-  // streaming / staking / swap
-  'subscribeTransactions',
-  'getStakeInfo',
+  'rpcRequest',
   'getSwapQuote',
-  // wallet
-  'generateKeypair',
-  'getWalletAddress',
-  'loadKeypair',
-  'clearKeypair',
-  'signMessage',
+  'watchTransactions',
+  'watchAccounts',
   'buildSolTransfer',
-  'buildStakeDelegation',
-  'signAndSendTransaction',
+  'simulateTransaction',
+  'apexGetBundleStatuses',
+  'apexGetTipAccounts',
+  'apexPing',
+  'getOrbitflareAccount',
 ];
+
+const DESTRUCTIVE = [
+  'sendTransaction',
+  'apexSendTransaction',
+  'apexSendBundle',
+  'wallet',
+  'manageApiKeys',
+  'manageLicense',
+  'billing',
+];
+
+const WRITES = ['setApiKey', 'auth', 'updateProfile'];
+
+const CONFIRM_GATED = [...DESTRUCTIVE];
 
 const EXPECTED_RESOURCES = [
-  'orbitflare://docs/index',
-  'orbitflare://docs/quickstart',
-  'orbitflare://docs/authentication',
-  'orbitflare://docs/products',
-  'orbitflare://docs/jetstream',
-  'orbitflare://docs/yellowstone',
-  'orbitflare://docs/rpc-http',
-  'orbitflare://docs/staking',
-  'orbitflare://docs/metis-swap',
-  'orbitflare://docs/cli',
-  'orbitflare://docs/customer-api',
-];
+  'index',
+  'quickstart',
+  'authentication',
+  'infrastructure',
+  'products',
+  'rpc-http',
+  'rpc-websocket',
+  'transaction-history',
+  'das',
+  'das-asset-object',
+  'das-pagination',
+  'das-display-options',
+  'recipes',
+  'troubleshooting-transactions',
+  'troubleshooting-websocket',
+  'troubleshooting-grpc',
+  'apex-typescript-client',
+  'jetstream',
+  'jetstream-reference',
+  'yellowstone',
+  'apex',
+  'apex-tips',
+  'metis-swap',
+  'cli',
+  'customer-api',
+  'dedicated-nodes',
+  'shredstream',
+  'nft-pass',
+  'historical-data',
+  'rpc-error-codes',
+  'apex-endpoints',
+  'apex-bundles',
+  'apex-errors',
+  'bnb-chain',
+  'polygon',
+  'robinhood-chain',
+].map((n) => `orbitflare://docs/${n}`);
 
-interface ToolHandle {
-  client: Client;
-  transport: StdioClientTransport;
-  dispose: () => Promise<void>;
-}
-
-async function spawnServer(env: Record<string, string> = {}): Promise<ToolHandle> {
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [SERVER_PATH],
-    env: { ...process.env, ...env } as Record<string, string>,
-    stderr: 'pipe',
-  });
-
-  const client = new Client(
-    { name: 'orbitflare-mcp-tests', version: '0.0.0' },
-    { capabilities: {} },
-  );
-
-  await client.connect(transport);
-
-  return {
-    client,
-    transport,
-    async dispose() {
-      try {
-        await client.close();
-      } catch {
-        // ignore
-      }
-    },
-  };
-}
-
-interface ToolResultText {
-  text: string;
-  isError: boolean;
-}
-
-function extractText(result: unknown): ToolResultText {
-  const r = result as {
-    isError?: boolean;
-    content?: Array<{ type: string; text?: string }>;
-  };
-  const text = (r.content ?? [])
-    .filter((c) => c.type === 'text' && typeof c.text === 'string')
-    .map((c) => c.text as string)
-    .join('\n');
-  return { text, isError: r.isError === true };
-}
-
-function extractJsonBlock(text: string): unknown {
-  const match = text.match(/```json\s*([\s\S]*?)```/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
-}
-
-describe('OrbitFlare MCP server', () => {
-  let handle: ToolHandle;
+describe('tool registry', () => {
+  let h: Harness;
+  let docs: MockHttp;
 
   beforeAll(async () => {
-    handle = await spawnServer();
+    docs = await mockServer((req) =>
+      req.path === '/quickstart.md' ? { raw: '# Quickstart\nOrbitFlare quickstart page' } : { status: 404, raw: 'missing' },
+    );
+    h = await spawnServer({ ORBITFLARE_DOCS_URL: docs.url });
   });
 
   afterAll(async () => {
-    await handle?.dispose();
+    await h?.close();
+    await docs?.close();
   });
 
-  it('lists all expected tools', async () => {
-    const { tools } = await handle.client.listTools();
+  it('registers exactly the expected 31 tools', async () => {
+    const { tools } = await h.client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual([...EXPECTED_TOOLS].sort());
-    expect(names.length).toBe(EXPECTED_TOOLS.length);
+    expect(names).toEqual([...READ_ONLY, ...DESTRUCTIVE, ...WRITES].sort());
+    expect(names).toHaveLength(29);
+  });
+
+  it('every tool has a title, description, object input schema and annotations', async () => {
+    const { tools } = await h.client.listTools();
     for (const t of tools) {
-      expect(t.description).toBeTruthy();
+      expect(t.title, t.name).toBeTruthy();
+      expect(t.description!.length, t.name).toBeGreaterThan(40);
+      expect(t.inputSchema.type, t.name).toBe('object');
+      expect(t.annotations, t.name).toBeDefined();
+      expect(typeof t.annotations!.readOnlyHint, t.name).toBe('boolean');
+      expect(typeof t.annotations!.openWorldHint, t.name).toBe('boolean');
+      if (t.outputSchema) expect(t.outputSchema.type, t.name).toBe('object');
     }
   });
 
-  it('lists all 11 expected doc resources', async () => {
-    const { resources } = await handle.client.listResources();
-    const uris = resources.map((r) => r.uri).sort();
-    expect(uris).toEqual([...EXPECTED_RESOURCES].sort());
-  });
-
-  it('setApiKey stores a key and accepts network/region switches', async () => {
-    const result = await handle.client.callTool({
-      name: 'setApiKey',
-      arguments: {
-        apiKey: 'dummy-key-12345678',
-        network: 'devnet',
-        region: 'fra',
-      },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(false);
-    expect(text).toMatch(/Stored rpc API key/);
-    expect(text).toMatch(/network=devnet/);
-    expect(text).toMatch(/region=fra/);
-  });
-
-  it('getStakeInfo returns validator info and reward estimate', async () => {
-    const result = await handle.client.callTool({
-      name: 'getStakeInfo',
-      arguments: { amountSol: 100 },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(false);
-    const json = extractJsonBlock(text) as {
-      voteAccount: string;
-      identity: string;
-      estimatedApyPct: number;
-      estimatedRewards: { yearly: number; monthly: number };
-      howToStake: { docs: string };
-    };
-    expect(json.voteAccount).toBe('68q1YeY3QJoL3DF3umVKkCFARYh931sQTbZbRtYthGu9');
-    expect(json.identity).toBe('orbit1bWKxnECKLqjhm5rybTiEC2GEYbecyebgEfM5q');
-    expect(json.estimatedApyPct).toBeCloseTo(6.18, 2);
-    expect(json.estimatedRewards.yearly).toBeCloseTo(6.18, 2);
-    expect(json.estimatedRewards.monthly).toBeGreaterThan(0);
-    expect(json.howToStake.docs).toContain('docs.orbitflare.com');
-  });
-
-  it('subscribeTransactions builds a Jetstream config', async () => {
-    const result = await handle.client.callTool({
-      name: 'subscribeTransactions',
-      arguments: {
-        service: 'jetstream',
-        region: 'fra',
-        accountInclude: ['JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'],
-      },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(false);
-    const json = extractJsonBlock(text) as {
-      service: string;
-      grpcEndpoint: string;
-      yamlConfig: { transactions: { my_filter: { account_include: string[] } } };
-      cliCommand: string;
-    };
-    expect(json.service).toBe('jetstream');
-    expect(json.grpcEndpoint).toBe('http://fra.jetstream.orbitflare.com');
-    expect(json.cliCommand).toContain('orbitflare jet');
-    expect(json.yamlConfig.transactions.my_filter.account_include).toEqual([
-      'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
-    ]);
-  });
-
-  it('subscribeTransactions builds a Yellowstone config with vote/failed flags', async () => {
-    const result = await handle.client.callTool({
-      name: 'subscribeTransactions',
-      arguments: {
-        service: 'yellowstone',
-        region: 'ams',
-        vote: false,
-        failed: false,
-        commitment: 'confirmed',
-      },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(false);
-    const json = extractJsonBlock(text) as {
-      service: string;
-      grpcEndpoint: string;
-      yamlConfig: {
-        commitment: string;
-        transactions: { my_filter: { vote: boolean; failed: boolean } };
-      };
-    };
-    expect(json.service).toBe('yellowstone');
-    expect(json.grpcEndpoint).toBe('http://ams.rpc.orbitflare.com:10000');
-    expect(json.yamlConfig.commitment).toBe('confirmed');
-    expect(json.yamlConfig.transactions.my_filter.vote).toBe(false);
-    expect(json.yamlConfig.transactions.my_filter.failed).toBe(false);
-  });
-
-  it.skipIf(SKIP_NETWORK)(
-    'getSwapQuote fetches a live Jupiter quote for SOL->USDC',
-    async () => {
-      const result = await handle.client.callTool({
-        name: 'getSwapQuote',
-        arguments: {
-          inputMint: 'SOL',
-          outputMint: 'USDC',
-          amount: 10000000,
-          slippageBps: 50,
-        },
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        quote: {
-          inputMint: string;
-          outputMint: string;
-          inAmount: string;
-          outAmount: string;
-        };
-      };
-      expect(json.quote.inputMint).toBe('So11111111111111111111111111111111111111112');
-      expect(json.quote.outputMint).toBe('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-      expect(json.quote.inAmount).toBe('10000000');
-      expect(Number(json.quote.outAmount)).toBeGreaterThan(0);
-    },
-  );
-
-  it.skipIf(SKIP_NETWORK)(
-    'fetches the quickstart doc resource over the network',
-    async () => {
-      const result = await handle.client.readResource({
-        uri: 'orbitflare://docs/quickstart',
-      });
-      const text = (result.contents[0] as { text: string }).text;
-      expect(text.length).toBeGreaterThan(100);
-      expect(text).toMatch(/Quickstart|OrbitFlare/i);
-    },
-  );
-});
-
-describe('OrbitFlare MCP — no API key configured', () => {
-  let handle: ToolHandle;
-
-  beforeAll(async () => {
-    handle = await spawnServer({
-      ORBITFLARE_API_KEY: '',
-      ORBITFLARE_LICENSE_KEY: '',
-      ORBITFLARE_CUSTOMER_API_KEY: '',
-      ORBITFLARE_RPC_URL: '',
-    });
-  });
-
-  afterAll(async () => {
-    await handle?.dispose();
-  });
-
-  it('getBalance returns a helpful error when no RPC key is set', async () => {
-    const result = await handle.client.callTool({
-      name: 'getBalance',
-      arguments: { address: '11111111111111111111111111111111' },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(true);
-    expect(text.toLowerCase()).toMatch(/license key|api key/);
-  });
-
-  it('getProfile returns a helpful error when no Customer API key is set', async () => {
-    const result = await handle.client.callTool({
-      name: 'getProfile',
-      arguments: {},
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(true);
-    expect(text.toLowerCase()).toMatch(/customer api (key|credential)|api key/);
-  });
-});
-
-describe('OrbitFlare MCP — wallet flow (offline)', () => {
-  let handle: ToolHandle;
-  // sandboxed home so persisted keypair doesn't pollute the real one
-  const tmpHome = resolve(__dirname, '..', '.tmp-home-wallet');
-
-  beforeAll(async () => {
-    handle = await spawnServer({
-      HOME: tmpHome,
-      ORBITFLARE_API_KEY: '',
-      ORBITFLARE_LICENSE_KEY: '',
-      ORBITFLARE_CUSTOMER_API_KEY: '',
-      ORBITFLARE_BEARER_TOKEN: '',
-      ORBITFLARE_RPC_URL: '',
-    });
-  });
-
-  afterAll(async () => {
-    await handle?.dispose();
-    try {
-      const { rmSync } = await import('node:fs');
-      rmSync(tmpHome, { recursive: true, force: true });
-    } catch {
-      // ignore
+  it('marks reads read-only and spends/deletes destructive and non-idempotent', async () => {
+    const { tools } = await h.client.listTools();
+    const byName = new Map(tools.map((t) => [t.name, t.annotations!]));
+    for (const name of READ_ONLY) expect(byName.get(name)!.readOnlyHint, name).toBe(true);
+    for (const name of DESTRUCTIVE) {
+      const a = byName.get(name)!;
+      expect(a.readOnlyHint, name).toBe(false);
+      expect(a.destructiveHint, name).toBe(true);
+      expect(a.idempotentHint, name).toBe(false);
+    }
+    for (const name of WRITES) {
+      expect(byName.get(name)!.readOnlyHint, name).toBe(false);
+      expect(byName.get(name)!.destructiveHint, name).toBe(false);
     }
   });
 
-  it('generates a keypair, signs a message, and clears it', async () => {
-    const gen = await handle.client.callTool({
-      name: 'generateKeypair',
-      arguments: { persist: false },
-    });
-    const genJson = extractJsonBlock(extractText(gen).text) as {
-      address: string;
-      persisted: boolean;
-    };
-    expect(extractText(gen).isError).toBe(false);
-    expect(genJson.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-    expect(genJson.persisted).toBe(false);
-
-    const addr = await handle.client.callTool({
-      name: 'getWalletAddress',
-      arguments: {},
-    });
-    const addrJson = extractJsonBlock(extractText(addr).text) as {
-      loaded: boolean;
-      address: string;
-    };
-    expect(addrJson.loaded).toBe(true);
-    expect(addrJson.address).toBe(genJson.address);
-
-    const signed = await handle.client.callTool({
-      name: 'signMessage',
-      arguments: { message: 'orbitflare-mcp-test' },
-    });
-    const signedJson = extractJsonBlock(extractText(signed).text) as {
-      publicKey: string;
-      signatureBase58: string;
-      signatureBase64: string;
-    };
-    expect(extractText(signed).isError).toBe(false);
-    expect(signedJson.publicKey).toBe(genJson.address);
-    expect(signedJson.signatureBase58.length).toBeGreaterThanOrEqual(86);
-    expect(signedJson.signatureBase64.length).toBeGreaterThanOrEqual(86);
-
-    // verify the signature with @noble/ed25519 against the publicKey
-    const ed25519 = await import('@noble/ed25519');
-    const bs58Mod = await import('bs58');
-    const bs58 = bs58Mod.default ?? bs58Mod;
-    const sigBytes = bs58.decode(signedJson.signatureBase58);
-    const pubBytes = bs58.decode(signedJson.publicKey);
-    const msgBytes = new TextEncoder().encode('orbitflare-mcp-test');
-    const ok = await ed25519.verifyAsync(sigBytes, msgBytes, pubBytes);
-    expect(ok).toBe(true);
-
-    const cleared = await handle.client.callTool({
-      name: 'clearKeypair',
-      arguments: { removeFromDisk: true },
-    });
-    expect(extractText(cleared).isError).toBe(false);
-
-    const after = await handle.client.callTool({
-      name: 'getWalletAddress',
-      arguments: {},
-    });
-    const afterJson = extractJsonBlock(extractText(after).text) as {
-      loaded: boolean;
-      address: string | null;
-    };
-    expect(afterJson.loaded).toBe(false);
-    expect(afterJson.address).toBeNull();
+  it('every destructive tool takes a boolean confirm argument', async () => {
+    const { tools } = await h.client.listTools();
+    for (const t of tools.filter((x) => CONFIRM_GATED.includes(x.name))) {
+      const props = t.inputSchema.properties as Record<string, { type?: string }>;
+      expect(props.confirm?.type, t.name).toBe('boolean');
+      expect(t.inputSchema.required ?? [], t.name).not.toContain('confirm');
+    }
   });
 
-  it('signMessage errors when no keypair is loaded', async () => {
-    const result = await handle.client.callTool({
-      name: 'signMessage',
-      arguments: { message: 'hello' },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(true);
-    expect(text.toLowerCase()).toMatch(/no keypair loaded/);
+  it('declares output schemas for fees and network status', async () => {
+    const { tools } = await h.client.listTools();
+    const withOutput = tools.filter((t) => t.outputSchema).map((t) => t.name).sort();
+    expect(withOutput).toEqual(['getNetworkStatus', 'getPriorityFees']);
   });
 
-  it('buildSolTransfer errors when no keypair is loaded', async () => {
-    const result = await handle.client.callTool({
-      name: 'buildSolTransfer',
-      arguments: {
-        recipient: '11111111111111111111111111111112',
-        amountSol: 0.001,
-      },
-    });
-    const { text, isError } = extractText(result);
-    expect(isError).toBe(true);
-    expect(text.toLowerCase()).toMatch(/no keypair loaded/);
+  it('lists the documentation resources', async () => {
+    const { resources } = await h.client.listResources();
+    expect(resources.map((r) => r.uri).sort()).toEqual([...EXPECTED_RESOURCES].sort());
+  });
+
+  it('reads a documentation resource from the docs site', async () => {
+    const result = await h.client.readResource({ uri: 'orbitflare://docs/quickstart' });
+    expect((result.contents[0] as { text: string }).text).toContain('OrbitFlare quickstart page');
+    expect(docs.requests.at(-1)!.path).toBe('/quickstart.md');
+  });
+
+  it('reports a docs fetch failure inside the resource instead of failing', async () => {
+    const result = await h.client.readResource({ uri: 'orbitflare://docs/apex' });
+    expect((result.contents[0] as { text: string }).text).toMatch(/Error loading .*apex\/overview\.md/);
+  });
+
+  it('setApiKey reports the configuration and rejects unknown regions', async () => {
+    const ok = await call(h.client, 'setApiKey', { apiKey: 'dummy-key-12345678', region: 'ams' });
+    expect(ok.isError).toBe(false);
+    expect(ok.json).toMatchObject({ region: 'ams', rpcKey: true, rpcEndpoint: 'https://ams.rpc.orbitflare.com' });
+    expect(ok.text).toContain('stored rpc API key');
+
+    const bad = await call(h.client, 'setApiKey', { region: 'mars' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/Unknown region/);
+
+    const alias = await call(h.client, 'setApiKey', { region: 'tok' });
+    expect(alias.json.region).toBe('jp');
+  });
+
+  it('validates inputs before calling anything', async () => {
+    const res = await call(h.client, 'getAccount', { addresses: [] });
+    expect(res.isError).toBe(true);
   });
 });
 
-describe.skipIf(SKIP_NETWORK)(
-  'OrbitFlare MCP — live RPC roundtrip via ORBITFLARE_RPC_URL',
-  () => {
-    let handle: ToolHandle;
+describe('without credentials', () => {
+  let h: Harness;
 
-    beforeAll(async () => {
-      handle = await spawnServer({
-        ORBITFLARE_RPC_URL: 'https://api.devnet.solana.com',
-        ORBITFLARE_API_KEY: 'test',
-      });
-    });
+  beforeAll(async () => {
+    h = await spawnServer();
+  });
 
-    afterAll(async () => {
-      await handle?.dispose();
-    });
+  afterAll(async () => {
+    await h?.close();
+  });
 
-    it('getBalance roundtrips against Solana devnet', async () => {
-      const result = await handle.client.callTool({
-        name: 'getBalance',
-        arguments: { address: '11111111111111111111111111111111' },
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        address: string;
-        lamports: number;
-        sol: string;
-        slot: number;
-      };
-      expect(json.address).toBe('11111111111111111111111111111111');
-      expect(typeof json.lamports).toBe('number');
-      expect(json.slot).toBeGreaterThan(0);
-    });
+  it('RPC tools explain how to set the license key', async () => {
+    const res = await call(h.client, 'getAccount', { address: '11111111111111111111111111111111' });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/ORBITFLARE_API_KEY/);
+  });
 
-    it('getSlot returns a positive number', async () => {
-      const result = await handle.client.callTool({
-        name: 'getSlot',
-        arguments: { commitment: 'confirmed' },
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as { slot: number; commitment: string };
-      expect(typeof json.slot).toBe('number');
-      expect(json.slot).toBeGreaterThan(0);
-      expect(json.commitment).toBe('confirmed');
-    });
+  it('Customer API tools explain how to sign in', async () => {
+    const res = await call(h.client, 'getOrbitflareAccount');
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/Customer API credential/);
+  });
 
-    it('getEpochInfo returns the documented shape', async () => {
-      const result = await handle.client.callTool({
-        name: 'getEpochInfo',
-        arguments: {},
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        epoch: number;
-        slotIndex: number;
-        slotsInEpoch: number;
-        progressPct: number;
-      };
-      expect(json.epoch).toBeGreaterThanOrEqual(0);
-      expect(json.slotIndex).toBeGreaterThanOrEqual(0);
-      expect(json.slotsInEpoch).toBeGreaterThan(0);
-      expect(json.progressPct).toBeGreaterThanOrEqual(0);
-      expect(json.progressPct).toBeLessThanOrEqual(100);
-    });
-
-    it('getLatestBlockhash returns a blockhash + lastValidBlockHeight', async () => {
-      const result = await handle.client.callTool({
-        name: 'getLatestBlockhash',
-        arguments: {},
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        blockhash: string;
-        lastValidBlockHeight: number;
-        slot: number;
-      };
-      expect(json.blockhash.length).toBeGreaterThan(20);
-      expect(json.lastValidBlockHeight).toBeGreaterThan(0);
-      expect(json.slot).toBeGreaterThan(0);
-    });
-
-    it('getMultipleAccounts batches a system + sysvar lookup', async () => {
-      const result = await handle.client.callTool({
-        name: 'getMultipleAccounts',
-        arguments: {
-          addresses: [
-            '11111111111111111111111111111111',
-            'SysvarRent111111111111111111111111111111111',
-          ],
-        },
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as { value: unknown[] };
-      expect(Array.isArray(json.value)).toBe(true);
-      expect(json.value.length).toBe(2);
-    });
-
-    it('getMinimumBalanceForRentExemption returns lamports + sol', async () => {
-      const result = await handle.client.callTool({
-        name: 'getMinimumBalanceForRentExemption',
-        arguments: { dataLength: 100 },
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        dataLength: number;
-        lamports: number;
-      };
-      expect(json.dataLength).toBe(100);
-      expect(json.lamports).toBeGreaterThan(0);
-    });
-
-    it('getNetworkStatus returns version + identity + slot', async () => {
-      const result = await handle.client.callTool({
-        name: 'getNetworkStatus',
-        arguments: {},
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        endpoint: string;
-        version: unknown;
-        identity: unknown;
-        slot: unknown;
-      };
-      expect(json.endpoint).toContain('http');
-      expect(json.version).toBeTruthy();
-      expect(json.identity).toBeTruthy();
-      expect(json.slot).toBeTruthy();
-    });
-
-    it('getRecentPrioritizationFees returns percentile breakdown', async () => {
-      const result = await handle.client.callTool({
-        name: 'getRecentPrioritizationFees',
-        arguments: {},
-      });
-      const { text, isError } = extractText(result);
-      expect(isError).toBe(false);
-      const json = extractJsonBlock(text) as {
-        sampleCount: number;
-        microLamportsPerCu: { p50: number; p90: number };
-      };
-      expect(json.sampleCount).toBeGreaterThanOrEqual(0);
-      expect(json.microLamportsPerCu.p50).toBeGreaterThanOrEqual(0);
-      expect(json.microLamportsPerCu.p90).toBeGreaterThanOrEqual(
-        json.microLamportsPerCu.p50,
-      );
-    });
-  },
-);
+  it('watchAccounts needs the license key too', async () => {
+    const res = await call(h.client, 'watchAccounts', { accounts: ['11111111111111111111111111111111'] });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/license key/);
+  });
+});
