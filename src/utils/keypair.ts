@@ -9,12 +9,18 @@ import bs58 from 'bs58';
 import {
   ensureOrbitflareDir,
   KEYPAIR_FILE,
+  MissingKeypairError,
   setWalletAddress,
 } from '../config.js';
 
 let activeSigner: KeyPairSigner | null = null;
 
 export function getActiveSigner(): KeyPairSigner | null {
+  return activeSigner;
+}
+
+export function requireSigner(): KeyPairSigner {
+  if (!activeSigner) throw new MissingKeypairError();
   return activeSigner;
 }
 
@@ -97,11 +103,7 @@ export function clearKeypair(removeFromDisk = false): void {
 }
 
 export async function signMessageBytes(message: Uint8Array): Promise<Uint8Array> {
-  if (!activeSigner) {
-    throw new Error('No wallet keypair loaded. Use generateKeypair or loadKeypair first.');
-  }
-  const sig = await signBytes(activeSigner.keyPair.privateKey, message);
-  return sig;
+  return signBytes(requireSigner().keyPair.privateKey, message);
 }
 
 export function signatureToBase58(sig: Uint8Array): string {
