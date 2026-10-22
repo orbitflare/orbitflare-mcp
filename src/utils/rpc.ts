@@ -1,75 +1,62 @@
-import { getApiKey, getRpcUrl, MissingApiKeyError } from '../config.js';
+import { OrbitflareError, RpcClientBuilder, type RpcClient } from '@orbitflare/sdk';
+import { getApiKey, getRpcUrls, MissingApiKeyError } from '../config.js';
+import { sdkLogger } from './logger.js';
 
-export interface JsonRpcError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
+let cached: { key: string; client: RpcClient } | null = null;
 
-export class OrbitFlareRpcError extends Error {
-  code: number;
-  data?: unknown;
-  constructor(err: JsonRpcError) {
-    super(`OrbitFlare RPC error ${err.code}: ${err.message}`);
-    this.name = 'OrbitFlareRpcError';
-    this.code = err.code;
-    this.data = err.data;
-  }
-}
-
-let requestId = 0;
-
-export async function rpcCall<T = unknown>(
-  method: string,
-  params: unknown[] = [],
-): Promise<T> {
+export function rpc(): RpcClient {
+  const urls = getRpcUrls();
   const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new MissingApiKeyError('rpc');
+  const needsKey = urls[0].includes('orbitflare.com') && !urls[0].includes('api_key=');
+  if (!apiKey && needsKey) throw new MissingApiKeyError('rpc');
+  const cacheKey = `${apiKey ?? ''}|${urls.join(',')}`;
+  if (cached?.key === cacheKey) return cached.client;
+  const client = new RpcClientBuilder()
+    .urls(urls)
+    .apiKey(apiKey ?? '')
+    .commitment('confirmed')
+    .timeoutMs(30_000)
+    .retry({ initialDelayMs: 200, maxDelayMs: 2_000, multiplier: 2, maxAttempts: 3 })
+    .logger(sdkLogger)
+    .build();
+  cached = { key: cacheKey, client };
+  return client;
+}
+
+export function friendlyError(err: unknown): Error {
+  if (!(err instanceof OrbitflareError)) return err instanceof Error ? err : new Error(String(err));
+  const code = err.rpc?.code;
+  if (code === -401 || code === -403) {
+    return new Error(
+      `OrbitFlare RPC rejected the license key (HTTP ${-code}). Check ORBITFLARE_API_KEY or call setApiKey.`,
+    );
   }
+  if (err.kind === 'rateLimited') {
+    return new Error('OrbitFlare RPC rate limit hit (HTTP 429). Slow down or upgrade your plan.');
+  }
+  if (code === -32601 || code === -404) {
+    return new Error(`${err.message}. This endpoint does not support that method.`);
+  }
+  return err;
+}
 
-  const url = `${getRpcUrl()}?api_key=${encodeURIComponent(apiKey)}`;
-  const body = {
-    jsonrpc: '2.0',
-    id: ++requestId,
-    method,
-    params,
-  };
-
-  let response: Response;
+export async function rpcCall<T = any>(method: string, params: unknown = []): Promise<T> {
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    return await rpc().request<T>(method, params);
   } catch (err) {
-    const cause = err instanceof Error ? err.message : String(err);
-    throw new Error(`Network error contacting OrbitFlare RPC: ${cause}`);
+    throw friendlyError(err);
   }
+}
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(
-        `OrbitFlare RPC auth failed (HTTP ${response.status}). Check your license key. ${text}`,
-      );
-    }
-    if (response.status === 429) {
-      throw new Error(
-        'OrbitFlare RPC rate limit hit (HTTP 429). Slow down or upgrade your plan tier.',
-      );
-    }
-    throw new Error(`OrbitFlare RPC HTTP ${response.status}: ${text}`);
+export async function withRpc<T>(fn: (client: RpcClient) => Promise<T>): Promise<T> {
+  try {
+    return await fn(rpc());
+  } catch (err) {
+    throw friendlyError(err);
   }
+}
 
-  const json = (await response.json()) as {
-    result?: T;
-    error?: JsonRpcError;
-  };
-
-  if (json.error) {
-    throw new OrbitFlareRpcError(json.error);
-  }
-  return json.result as T;
+export function isMethodNotFound(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /-32601|method not found|does not support that method/i.test(msg);
 }

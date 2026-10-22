@@ -9,35 +9,23 @@ import { registerResources } from './resources/index.js';
 import { loadKeypairFromDisk } from './utils/keypair.js';
 import { VERSION } from './version.js';
 
-const INSTRUCTIONS = `OrbitFlare MCP Server
+const INSTRUCTIONS = `OrbitFlare MCP server: Solana data and transaction tools on OrbitFlare's Shredstream-optimized RPC, DAS API, Jetstream streaming and Apex transaction landing, plus OrbitFlare account management.
 
-OrbitFlare provides Shredstream-optimized Solana infrastructure across 11 global regions:
-RPC nodes, Jetstream/Yellowstone gRPC streaming, dedicated nodes, validator staking, and Metis Swap.
+Choosing tools:
+- What a wallet holds: getWalletPortfolio (SOL, tokens with USD prices, NFTs). One asset or mint: getAsset. Find assets by owner/creator/collection: searchAssets. Who holds a token: getTokenHolders.
+- Raw accounts and balances: getAccount. One transaction: getTransaction. History of an address: getTransactionHistory (filters + paginationToken).
+- Fees: getPriorityFees (pass writable accounts such as a pool; without them the result is usually 0). Cluster/endpoint health, slot, epoch, blockhash: getNetworkStatus. Anything else read-only: rpcRequest.
+- Live data for a short window: watchTransactions (Jetstream), watchAccounts (WebSocket).
+- Moving funds: buildSolTransfer -> simulateTransaction -> sendTransaction (via "rpc" or "apex"). Apex sends need an Apex API key and exactly one SystemProgram tip (>= 0.001 SOL on the standard tier) to an APeX tip account; buildSolTransfer apexTipLamports adds it.
+- Signing keypair: wallet. OrbitFlare account: auth, getOrbitflareAccount, updateProfile, manageApiKeys, manageLicense, billing. Credentials and endpoint: setApiKey.
 
-This server exposes 53 tools organized by domain — every tool is independently callable:
-- RPC reads (balance, accounts, transactions, blocks, slots, epochs, fees, supply, simulation, etc.)
-- Customer API (profile, licenses, plans, invoices, top-up, plan purchase)
-- Auth flows (device code, wallet challenge — both for sign-in and account creation)
-- API key + license management (create, regenerate, delete, IP whitelist)
-- Streaming config builder for Jetstream / Yellowstone gRPC
-- Wallet helpers (generate / load / clear keypair, sign messages, build SOL transfers,
-  build stake delegations to OrbitFlare's validator, sign+send transactions)
-- Validator staking info and Metis Swap quotes
+Safety: tools that send transactions, spend balance, or delete/regenerate credentials do nothing unless called with confirm: true. Call them without it first, show the user what would happen, and only confirm after the user agrees.
 
-Resources under orbitflare://docs/* serve official OrbitFlare documentation pages —
-read these to ground your responses.
+Read orbitflare://docs/* resources to ground answers about OrbitFlare products, including those without tools here (Shredstream, dedicated nodes, the OrbitFlare Pass, BNB Chain, Polygon and Robinhood Chain RPC). Prices change; point users to https://orbitflare.com/pricing rather than quoting from memory.
 
-Auth model:
-- ORBITFLARE_API_KEY: RPC license key (required for any RPC tool)
-- ORBITFLARE_CUSTOMER_API_KEY or a Bearer token from auth tools: needed for Customer API tools
-- ORBITFLARE_NETWORK=mainnet|devnet, ORBITFLARE_RPC_URL=<custom> for endpoint overrides
-- Wallet keypair is generated/loaded via tools and persisted at ~/.orbitflare/mcp-keypair.json
-  (plaintext — do not store production wallets there).`;
+Configuration: ORBITFLARE_API_KEY (RPC license key), ORBITFLARE_NETWORK / ORBITFLARE_REGION / ORBITFLARE_RPC_URL, ORBITFLARE_APEX_API_KEY, ORBITFLARE_JETSTREAM_URL, ORBITFLARE_CUSTOMER_API_KEY (or sign in with auth). The wallet keypair file ~/.orbitflare/mcp-keypair.json is plaintext; never keep meaningful funds in it.`;
 
-const server = new McpServer(
-  { name: 'orbitflare-mcp', version: VERSION },
-  { instructions: INSTRUCTIONS },
-);
+const server = new McpServer({ name: 'orbitflare-mcp', version: VERSION }, { instructions: INSTRUCTIONS });
 
 registerTools(server);
 registerResources(server);
